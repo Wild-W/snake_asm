@@ -18,6 +18,7 @@ LR_SHARED           EQU 8000h
 NULL                EQU 0
 SW_SHOWNORMAL       EQU 1
 WM_DESTROY          EQU 2
+WM_PAINT            EQU 0xF
 WS_EX_COMPOSITED    EQU 2000000h
 WS_OVERLAPPEDWINDOW EQU 0CF0000h
 
@@ -40,6 +41,12 @@ extern              RegisterClassExA
 extern              ShowWindow
 extern              TranslateMessage
 extern              UpdateWindow
+extern              RGB
+extern              CreateSolidBrush
+extern              FillRect
+extern              DeleteObject
+extern              EndPaint
+extern              BeginPaint
 
 global              Start            ; Export symbols. The entry point
 
@@ -50,6 +57,8 @@ section             .data            ; Initialized data segment
 section .bss ; Uninitialized data segment
   alignb    8
   hInstance resq 1
+  row       resd 1
+  col       resd 1
 
 section .text ; Code segment
 Start:
@@ -223,11 +232,11 @@ WinMain:
 WndProc:
   push rbp      ; Set up a stack frame
   mov  rbp, rsp
-
-%define hWnd   rbp + 16 ; Location of the shadow space setup by
-%define uMsg   rbp + 24 ; the calling function
-%define wParam rbp + 32
-%define lParam rbp + 40
+  
+  %define hWnd   rbp + 16 ; Location of the shadow space setup by
+  %define uMsg   rbp + 24 ; the calling function
+  %define wParam rbp + 32
+  %define lParam rbp + 40
 
   mov qword [hWnd],   rcx ; Free up rcx rdx r8 r9 by spilling the
   mov qword [uMsg],   rdx ; 4 passed parameters to the shadow space
@@ -235,28 +244,134 @@ WndProc:
   mov qword [lParam], r9
 
   cmp qword [uMsg], WM_DESTROY ; [rbp + 24]
-  je  WMDESTROY
+  je  .WMDESTROY
+  cmp qword [uMsg], WM_PAINT
+  je  .WMPAINT
 
-DefaultMessage:
-  sub  rsp, 32             ; 32 bytes of shadow space
-  mov  rcx, qword [hWnd]   ; [rbp + 16]
-  mov  rdx, qword [uMsg]   ; [rbp + 24]
-  mov  r8,  qword [wParam] ; [rbp + 32]
-  mov  r9,  qword [lParam] ; [rbp + 40]
-  call DefWindowProcA
-  add  rsp, 32             ; Remove the 32 bytes
+  .DefaultMessage:
+    sub  rsp, 32             ; 32 bytes of shadow space
+    mov  rcx, qword [hWnd]   ; [rbp + 16]
+    mov  rdx, qword [uMsg]   ; [rbp + 24]
+    mov  r8,  qword [wParam] ; [rbp + 32]
+    mov  r9,  qword [lParam] ; [rbp + 40]
+    call DefWindowProcA
+    add  rsp, 32             ; Remove the 32 bytes
 
-  mov rsp, rbp ; Remove the stack frame
-  pop rbp
-  ret
+    mov rsp, rbp ; Remove the stack frame
+    pop rbp
+    ret
 
-WMDESTROY:
-  sub  rsp, 32         ; 32 bytes of shadow space
-  xor  ecx, ecx
-  call PostQuitMessage
-  add  rsp, 32         ; Remove the 32 bytes
+  .WMPAINT:
+    sub rsp, 32
+    mov rcx, qword [hWnd]   ; [rbp + 16]
+    mov rdx, qword [uMsg]   ; [rbp + 24]
+    mov r8,  qword [wParam] ; [rbp + 32]
+    mov r9,  qword [lParam] ; [rbp + 40]
+    
+    sub rsp, 80  ; HDC + PAINTSTRUCT
+    mov rdi, rsp
 
-  xor eax, eax ; WM_DESTROY has been processed, return 0
+    ; rcx hwnd
+    mov  rdx, [rdi+8]
+    call BeginPaint
+
+    mov [rdi], rax
+
+    mov dword [rel row], 0
+    .row_loop:
+      mov r9d, [rel row]
+      cmp r9d, GRID_SIZE
+      jge .row_loop_end
+
+      mov dword [rel col], 0
+      .col_loop:
+        mov edx, [rel col]
+        cmp edx, GRID_SIZE
+        jge .col_loop_end
+
+        mov  ecx, 0x2596be    ; Blue
+        call CreateSolidBrush
+
+        mov  ecx, r9d  ; row
+        ; edx col
+        mov  r8,  rax  ; brush
+        call DrawPixel
+
+        mov  rcx, r8
+        call DeleteObject
+
+        inc dword [rel col]
+        jmp .col_loop
+      .col_loop_end:
+
+      inc dword [rel row]
+      jmp .row_loop
+    .row_loop_end:
+
+    mov  rcx, qword [hWnd]
+    mov  rdx, [rdi]
+    call EndPaint
+
+    add rsp, 80
+
+    xor eax, eax
+    ret
+
+  .WMDESTROY:
+    sub  rsp, 32         ; 32 bytes of shadow space
+    xor  ecx, ecx
+    call PostQuitMessage
+    add  rsp, 32         ; Remove the 32 bytes
+
+    xor eax, eax ; WM_DESTROY has been processed, return 0
+    mov rsp, rbp ; Remove the stack frame
+    pop rbp
+    ret
+
+; ecx row
+; edx column
+; r8 brush
+; r9 hdc
+DrawPixel:
+  push rbp      ; Set up a stack frame
+  mov  rbp, rsp
+
+  %define iRow   rbp + 16 ; Location of the shadow space setup by
+  %define iCol   rbp + 24 ; the calling function
+  %define lBrush rbp + 32
+  %define lHdc   rbp + 40
+
+  mov qword [iRow],   rcx ; Free up rcx rdx r8 r9 by spilling the
+  mov qword [iCol],   rdx ; 4 passed parameters to the shadow space
+  mov qword [lBrush], r8  ; We can now access these parameters by name
+  mov qword [lHdc],   r9
+
+  sub rsp, 16  ; Allocate space for a RECT
+  mov rdi, rsp ; rdi holds the pointer to the RECT
+
+  imul edx,   CELL_SIZE ; col * CELL_SIZE
+  mov  [rdi], edx
+
+  imul ecx,     CELL_SIZE ; row * CELL_SIZE
+  mov  [rdi+4], ecx
+
+  mov  rcx,     qword [iCol]
+  add  ecx,     1
+  imul ecx,     CELL_SIZE
+  mov  [rdi+8], ecx
+
+  mov  rcx,      qword [iRow]
+  add  ecx,      1
+  imul ecx,      CELL_SIZE
+  mov  [rdi+12], ecx
+
+  mov  rcx, r9  ; hdc
+  mov  rdx, rdi ; rect
+  ; r8 lBrush
+  call FillRect
+
+  add rsp, 16 ; Free the RECT
+
   mov rsp, rbp ; Remove the stack frame
   pop rbp
   ret
