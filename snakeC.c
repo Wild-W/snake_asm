@@ -5,8 +5,10 @@
 const int GRID_SIZE = 20;
 const int CELL_SIZE = 20;
 
-int snakeX = 10;
-int snakeY = 10;
+int snakeX = GRID_SIZE / 2 - 1;
+int snakeY = snakeX;
+
+int[GRID_SIZE * 2] tiles;
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -41,6 +43,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     }
 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+void Update() {
+
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)

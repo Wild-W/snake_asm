@@ -5,7 +5,11 @@
 ; Template: https://www.davidgrantham.com/nasm-basicwindow64/
 ; Big thanks to David Grantham for the quickstart into x64 nasm
 
-COLOR_WINDOW        EQU 5            ; Constants
+FRUIT               EQU 2
+SNAKE               EQU 1
+NONE                EQU 0
+
+COLOR_WINDOW        EQU 5                     ; Constants
 CS_BYTEALIGNWINDOW  EQU 2000h
 CS_HREDRAW          EQU 2
 CS_VREDRAW          EQU 1
@@ -22,14 +26,14 @@ WM_PAINT            EQU 0xF
 WS_EX_COMPOSITED    EQU 2000000h
 WS_OVERLAPPEDWINDOW EQU 0CF0000h
 
-WindowWidth         EQU 640
-WindowHeight        EQU 480
-
 GRID_SIZE           EQU 20
-CELL_SIZE           EQU 20
+CELL_SIZE           EQU 30
 
-extern              CreateWindowExA  ; Import external symbols
-extern              DefWindowProcA   ; Windows API functions, not decorated
+WindowWidth         EQU GRID_SIZE * CELL_SIZE
+WindowHeight        EQU GRID_SIZE * CELL_SIZE
+
+extern              CreateWindowExA           ; Import external symbols
+extern              DefWindowProcA            ; Windows API functions, not decorated
 extern              DispatchMessageA
 extern              ExitProcess
 extern              GetMessageA
@@ -48,15 +52,24 @@ extern              DeleteObject
 extern              EndPaint
 extern              BeginPaint
 
-global              WinMain          ; Export symbols. The entry point
+global              WinMain                   ; Export symbols. The entry point
 
-section             .data            ; Initialized data segment
+section             .data                     ; Initialized data segment
   WindowName db "Snake", 0
   ClassName  db "GridWindowClass", 0
 
 section .bss ; Uninitialized data segment
   alignb    8
   hInstance resq 1
+
+  headX  resd 1
+  headY  resd 1
+  length resd 1
+  
+  tiles      resb GRID_SIZE * GRID_SIZE
+  nodes      resb GRID_SIZE * GRID_SIZE
+  xDirection resb 1
+  yDirection resb 1
 
 section .text ; Code segment
 WinMain:
@@ -79,32 +92,52 @@ main:
   mov  rbp, rsp
   sub  rsp, 136 + 8 ; 136 bytes for local variables. 136 is not
 
-%define wc               rbp - 136 ; WNDCLASSEX structure, 80 bytes
-%define wc.cbSize        rbp - 136 ; 4 bytes. Start on an 8 byte boundary
-%define wc.style         rbp - 132 ; 4 bytes
-%define wc.lpfnWndProc   rbp - 128 ; 8 bytes
-%define wc.cbClsExtra    rbp - 120 ; 4 bytes
-%define wc.cbWndExtra    rbp - 116 ; 4 bytes
-%define wc.hInstance     rbp - 112 ; 8 bytes
-%define wc.hIcon         rbp - 104 ; 8 bytes
-%define wc.hCursor       rbp - 96  ; 8 bytes
-%define wc.hbrBackground rbp - 88  ; 8 bytes
-%define wc.lpszMenuName  rbp - 80  ; 8 bytes
-%define wc.lpszClassName rbp - 72  ; 8 bytes
-%define wc.hIconSm       rbp - 64  ; 8 bytes. End on an 8 byte boundary
+  %define wc               rbp - 136 ; WNDCLASSEX structure, 80 bytes
+  %define wc.cbSize        rbp - 136 ; 4 bytes. Start on an 8 byte boundary
+  %define wc.style         rbp - 132 ; 4 bytes
+  %define wc.lpfnWndProc   rbp - 128 ; 8 bytes
+  %define wc.cbClsExtra    rbp - 120 ; 4 bytes
+  %define wc.cbWndExtra    rbp - 116 ; 4 bytes
+  %define wc.hInstance     rbp - 112 ; 8 bytes
+  %define wc.hIcon         rbp - 104 ; 8 bytes
+  %define wc.hCursor       rbp - 96  ; 8 bytes
+  %define wc.hbrBackground rbp - 88  ; 8 bytes
+  %define wc.lpszMenuName  rbp - 80  ; 8 bytes
+  %define wc.lpszClassName rbp - 72  ; 8 bytes
+  %define wc.hIconSm       rbp - 64  ; 8 bytes. End on an 8 byte boundary
 
-%define msg              rbp - 56  ; MSG structure, 48 bytes
-%define msg.hwnd         rbp - 56  ; 8 bytes. Start on an 8 byte boundary
-%define msg.message      rbp - 48  ; 4 bytes
-%define msg.Padding1     rbp - 44  ; 4 bytes. Natural alignment padding
-%define msg.wParam       rbp - 40  ; 8 bytes
-%define msg.lParam       rbp - 32  ; 8 bytes
-%define msg.time         rbp - 24  ; 4 bytes
-%define msg.py.x         rbp - 20  ; 4 bytes
-%define msg.pt.y         rbp - 16  ; 4 bytes
-%define msg.Padding2     rbp - 12  ; 4 bytes. Structure length padding
+  %define msg          rbp - 56 ; MSG structure, 48 bytes
+  %define msg.hwnd     rbp - 56 ; 8 bytes. Start on an 8 byte boundary
+  %define msg.message  rbp - 48 ; 4 bytes
+  %define msg.Padding1 rbp - 44 ; 4 bytes. Natural alignment padding
+  %define msg.wParam   rbp - 40 ; 8 bytes
+  %define msg.lParam   rbp - 32 ; 8 bytes
+  %define msg.time     rbp - 24 ; 4 bytes
+  %define msg.py.x     rbp - 20 ; 4 bytes
+  %define msg.pt.y     rbp - 16 ; 4 bytes
+  %define msg.Padding2 rbp - 12 ; 4 bytes. Structure length padding
 
-%define hWnd             rbp - 8   ; 8 bytes
+  %define hWnd rbp - 8 ; 8 bytes
+
+  ; Set starting positions
+  mov dword [rel length], 1
+  
+  mov eax,               GRID_SIZE / 2 - 1
+  mov dword [rel headX], eax
+  mov dword [rel headY], eax
+
+  lea  rcx,              [rel tiles]
+  mov  eax,              GRID_SIZE / 2 - 1
+  imul eax,              GRID_SIZE
+  add  eax,              GRID_SIZE / 2 - 1
+  mov  byte [rcx + rax], SNAKE
+  
+  add rax,              rcx
+  mov byte [rel nodes], al
+
+  mov eax,              17 * GRID_SIZE + 13
+  mov byte [rcx + rax], FRUIT
+  ; End set starting positions
 
   mov dword [wc.cbSize],      80                                           ; [rbp - 136]
   mov dword [wc.style],       CS_HREDRAW | CS_VREDRAW | CS_BYTEALIGNWINDOW ; [rbp - 132]
@@ -248,45 +281,69 @@ WndProc:
     mov  [rsp], rax      ; Store HDC
 
     xor r12d, r12d ; r12d as row counter
-  .row_loop:
-    cmp r12d, GRID_SIZE
-    jge .row_loop_end
+    .row_loop:
+      cmp r12d, GRID_SIZE
+      jge .row_loop_end
 
-    xor r13d, r13d ; r13d as column counter
-    .col_loop:
-      cmp r13d, GRID_SIZE
-      jge .col_loop_end
+      xor r13d, r13d ; r13d as column counter
+      .col_loop:
+        cmp r13d, GRID_SIZE
+        jge .col_loop_end
 
-      sub  rsp, 40
-      mov  ecx, 0x009933    ; Blue
-      call CreateSolidBrush
-      add  rsp, 40
-      mov  r14, rax         ; Store brush in r14
+        ; Calculate the offset into the tiles array
+        mov  eax, GRID_SIZE
+        imul eax, r12d
+        add  eax, r13d
+        
+        ; Load the base address of tiles
+        lea rcx, [rel tiles]
+        
+        ; Get the tile value
+        movzx eax, byte [rcx + rax]
+        
+        ; Compare with SNAKE constant
+        cmp al, SNAKE
+        jne .not_snake
 
-      mov  ecx, r12d  ; row
-      mov  edx, r13d  ; col
-      mov  r8,  r14   ; brush
-      mov  r9,  [rsp] ; hdc
-      call DrawPixel
+        ; Is a snake
+          mov ecx, 0xb733ff ; Purple
+          jmp .draw_pixel
+        
+        .not_snake:
+          mov ecx, 0x009933 ; Green
 
-      mov  rcx, r14
-      call DeleteObject
+        .draw_pixel:
 
-      inc r13d
-      jmp .col_loop
-    .col_loop_end:
+        sub  rsp, 40
+        call CreateSolidBrush
+        add  rsp, 40
+        mov  r14, rax         ; Store brush in r14
 
-    inc r12d
-    jmp .row_loop
-  .row_loop_end:
+        mov  ecx, r12d  ; row
+        mov  edx, r13d  ; col
+        mov  r8,  r14   ; brush
+        mov  r9,  [rsp] ; hdc
+        call DrawPixel
 
-  mov  rcx, [rbp+16] ; hWnd
-  lea  rdx, [rsp+48] ; Address of PAINTSTRUCT
-  call EndPaint
+        mov  rcx, r14
+        call DeleteObject
 
-  add rsp, 120
-  xor eax, eax
-  jmp .Exit
+        .col_continue:
+        inc r13d
+        jmp .col_loop
+      .col_loop_end:
+
+      inc r12d
+      jmp .row_loop
+    .row_loop_end:
+
+    mov  rcx, [rbp+16] ; hWnd
+    lea  rdx, [rsp+48] ; Address of PAINTSTRUCT
+    call EndPaint
+
+    add rsp, 120
+    xor eax, eax
+    jmp .Exit
 
   .WMDESTROY:
     xor  ecx, ecx
@@ -308,7 +365,6 @@ WndProc:
 DrawPixel:
   push rbp
   mov  rbp, rsp
-  sub  rsp, 32  ; Allocate shadow space
 
   push r12 ; Preserve r12
   push r13 ; Preserve r13
@@ -345,6 +401,12 @@ DrawPixel:
   pop r13 ; Restore r13
   pop r12 ; Restore r12
 
-  add rsp, 32 ; Free shadow space
+  pop rbp
+  ret
+
+Update:
+  push rbp
+  mov  rbp, rsp
+
   pop rbp
   ret
