@@ -408,5 +408,8 @@ Update:
   push rbp
   mov  rbp, rsp
 
+  push r12      ; node counter
+  xor  r12, r12
+
   pop rbp
   ret
