@@ -48,7 +48,7 @@ extern              DeleteObject
 extern              EndPaint
 extern              BeginPaint
 
-global              Start            ; Export symbols. The entry point
+global              WinMain          ; Export symbols. The entry point
 
 section             .data            ; Initialized data segment
   WindowName db "Snake", 0
@@ -57,11 +57,9 @@ section             .data            ; Initialized data segment
 section .bss ; Uninitialized data segment
   alignb    8
   hInstance resq 1
-  row       resd 1
-  col       resd 1
 
 section .text ; Code segment
-Start:
+WinMain:
   sub rsp, 8 ; Align stack pointer to 16 bytes
 
   sub  rsp,                   32  ; 32 bytes of shadow space
@@ -70,13 +68,13 @@ Start:
   mov  qword [REL hInstance], rax
   add  rsp,                   32  ; Remove the 32 bytes
 
-  call WinMain
+  call main
 
 .Exit:
   xor  ecx, ecx
   call ExitProcess
 
-WinMain:
+main:
   push rbp          ; Set up a stack frame
   mov  rbp, rsp
   sub  rsp, 136 + 8 ; 136 bytes for local variables. 136 is not
@@ -227,151 +225,126 @@ WinMain:
 
 ; HWND rcx
 ; UINT rdx
-; WPARAM r8d
-; LPARAM r9d
+; WPARAM r8
+; LPARAM r9
 WndProc:
-  push rbp      ; Set up a stack frame
+  push rbp
   mov  rbp, rsp
-  
-  %define hWnd   rbp + 16 ; Location of the shadow space setup by
-  %define uMsg   rbp + 24 ; the calling function
-  %define wParam rbp + 32
-  %define lParam rbp + 40
+  sub  rsp, 32  ; Allocate shadow space
 
-  mov qword [hWnd],   rcx ; Free up rcx rdx r8 r9 by spilling the
-  mov qword [uMsg],   rdx ; 4 passed parameters to the shadow space
-  mov qword [wParam], r8  ; We can now access these parameters by name
-  mov qword [lParam], r9
-
-  cmp qword [uMsg], WM_DESTROY ; [rbp + 24]
+  cmp edx, WM_DESTROY
   je  .WMDESTROY
-  cmp qword [uMsg], WM_PAINT
+  cmp edx, WM_PAINT
   je  .WMPAINT
 
   .DefaultMessage:
-    sub  rsp, 32             ; 32 bytes of shadow space
-    mov  rcx, qword [hWnd]   ; [rbp + 16]
-    mov  rdx, qword [uMsg]   ; [rbp + 24]
-    mov  r8,  qword [wParam] ; [rbp + 32]
-    mov  r9,  qword [lParam] ; [rbp + 40]
     call DefWindowProcA
-    add  rsp, 32             ; Remove the 32 bytes
-
-    mov rsp, rbp ; Remove the stack frame
-    pop rbp
-    ret
+    jmp  .Exit
 
   .WMPAINT:
-    sub rsp, 32
-    mov rcx, qword [hWnd]   ; [rbp + 16]
-    mov rdx, qword [uMsg]   ; [rbp + 24]
-    mov r8,  qword [wParam] ; [rbp + 32]
-    mov r9,  qword [lParam] ; [rbp + 40]
-    
-    sub rsp, 80  ; HDC + PAINTSTRUCT
-    mov rdi, rsp
-
-    ; rcx hwnd
-    mov  rdx, [rdi+8]
+    sub  rsp,   72      ; Allocate space for HDC and PAINTSTRUCT
+    lea  rdx,   [rsp+8] ; Address of PAINTSTRUCT
     call BeginPaint
+    mov  [rsp], rax     ; Store HDC
 
-    mov [rdi], rax
+    xor r12d, r12d ; r12d as row counter
+  .row_loop:
+    cmp r12d, GRID_SIZE
+    jge .row_loop_end
 
-    mov dword [rel row], 0
-    .row_loop:
-      mov r9d, [rel row]
-      cmp r9d, GRID_SIZE
-      jge .row_loop_end
+    xor r13d, r13d ; r13d as column counter
+    .col_loop:
+      cmp r13d, GRID_SIZE
+      jge .col_loop_end
 
-      mov dword [rel col], 0
-      .col_loop:
-        mov edx, [rel col]
-        cmp edx, GRID_SIZE
-        jge .col_loop_end
+      mov  ecx, 0x2596be          ; Blue
+      call CreateSolidBrush
+      test rax, rax
+      jz   .brush_creation_failed
+      mov  r14, rax               ; Store brush in r14
 
-        mov  ecx, 0x2596be    ; Blue
-        call CreateSolidBrush
+      mov  ecx, r12d  ; row
+      mov  edx, r13d  ; col
+      mov  r8,  r14   ; brush
+      mov  r9,  [rsp] ; hdc
+      call DrawPixel
 
-        mov  ecx, r9d  ; row
-        ; edx col
-        mov  r8,  rax  ; brush
-        call DrawPixel
+      mov  rcx, r14
+      call DeleteObject
 
-        mov  rcx, r8
-        call DeleteObject
+      inc r13d
+      jmp .col_loop
+    .col_loop_end:
 
-        inc dword [rel col]
-        jmp .col_loop
-      .col_loop_end:
+    inc r12d
+    jmp .row_loop
+  .row_loop_end:
 
-      inc dword [rel row]
-      jmp .row_loop
-    .row_loop_end:
+  mov  rcx, [rbp+16] ; hWnd
+  lea  rdx, [rsp+8]  ; Address of PAINTSTRUCT
+  call EndPaint
 
-    mov  rcx, qword [hWnd]
-    mov  rdx, [rdi]
-    call EndPaint
-
-    add rsp, 80
-
-    xor eax, eax
-    ret
+  add rsp, 72
+  xor eax, eax
+  jmp .Exit
 
   .WMDESTROY:
-    sub  rsp, 32         ; 32 bytes of shadow space
     xor  ecx, ecx
     call PostQuitMessage
-    add  rsp, 32         ; Remove the 32 bytes
+    xor  eax, eax
 
-    xor eax, eax ; WM_DESTROY has been processed, return 0
-    mov rsp, rbp ; Remove the stack frame
+  .Exit:
+    add rsp, 32 ; Free shadow space
     pop rbp
     ret
+
+  .brush_creation_failed:
+    int3
 
 ; ecx row
 ; edx column
 ; r8 brush
 ; r9 hdc
 DrawPixel:
-  push rbp      ; Set up a stack frame
+  push rbp
   mov  rbp, rsp
+  sub  rsp, 32  ; Allocate shadow space
 
-  %define iRow   rbp + 16 ; Location of the shadow space setup by
-  %define iCol   rbp + 24 ; the calling function
-  %define lBrush rbp + 32
-  %define lHdc   rbp + 40
+  push r12 ; Preserve r12
+  push r13 ; Preserve r13
 
-  mov qword [iRow],   rcx ; Free up rcx rdx r8 r9 by spilling the
-  mov qword [iCol],   rdx ; 4 passed parameters to the shadow space
-  mov qword [lBrush], r8  ; We can now access these parameters by name
-  mov qword [lHdc],   r9
+  mov r12d, ecx ; Store row in r12d
+  mov r13d, edx ; Store column in r13d
 
-  sub rsp, 16  ; Allocate space for a RECT
-  mov rdi, rsp ; rdi holds the pointer to the RECT
+  sub rsp, 16  ; Allocate space for RECT
+  mov rdi, rsp ; rdi points to RECT
 
-  imul edx,   CELL_SIZE ; col * CELL_SIZE
-  mov  [rdi], edx
+  ; Calculate and fill RECT structure
+  mov  eax,   CELL_SIZE
+  imul edx,   eax
+  mov  [rdi], edx       ; left = col * CELL_SIZE
 
-  imul ecx,     CELL_SIZE ; row * CELL_SIZE
-  mov  [rdi+4], ecx
+  imul ecx,     eax
+  mov  [rdi+4], ecx ; top = row * CELL_SIZE
 
-  mov  rcx,     qword [iCol]
-  add  ecx,     1
-  imul ecx,     CELL_SIZE
-  mov  [rdi+8], ecx
+  lea  ecx,     [r13d+1]
+  imul ecx,     eax
+  mov  [rdi+8], ecx      ; right = (col+1) * CELL_SIZE
 
-  mov  rcx,      qword [iRow]
-  add  ecx,      1
-  imul ecx,      CELL_SIZE
-  mov  [rdi+12], ecx
+  lea  ecx,      [r12d+1]
+  imul ecx,      eax
+  mov  [rdi+12], ecx      ; bottom = (row+1) * CELL_SIZE
 
   mov  rcx, r9  ; hdc
-  mov  rdx, rdi ; rect
-  ; r8 lBrush
+  mov  rdx, rdi ; &RECT
+  mov  r8,  r8  ; brush (already in r8)
   call FillRect
 
-  add rsp, 16 ; Free the RECT
+  add rsp, 16 ; Free RECT
 
-  mov rsp, rbp ; Remove the stack frame
+  pop r13 ; Restore r13
+  pop r12 ; Restore r12
+
+  add rsp, 32 ; Free shadow space
   pop rbp
   ret
