@@ -242,10 +242,10 @@ WndProc:
     jmp  .Exit
 
   .WMPAINT:
-    sub  rsp,   72      ; Allocate space for HDC and PAINTSTRUCT
-    lea  rdx,   [rsp+8] ; Address of PAINTSTRUCT
+    sub  rsp,   120      ; Allocate space for HDC and PAINTSTRUCT
+    lea  rdx,   [rsp+48] ; Address of PAINTSTRUCT
     call BeginPaint
-    mov  [rsp], rax     ; Store HDC
+    mov  [rsp], rax      ; Store HDC
 
     xor r12d, r12d ; r12d as row counter
   .row_loop:
@@ -257,11 +257,11 @@ WndProc:
       cmp r13d, GRID_SIZE
       jge .col_loop_end
 
-      mov  ecx, 0x2596be          ; Blue
+      sub  rsp, 40
+      mov  ecx, 0x009933    ; Blue
       call CreateSolidBrush
-      test rax, rax
-      jz   .brush_creation_failed
-      mov  r14, rax               ; Store brush in r14
+      add  rsp, 40
+      mov  r14, rax         ; Store brush in r14
 
       mov  ecx, r12d  ; row
       mov  edx, r13d  ; col
@@ -281,10 +281,10 @@ WndProc:
   .row_loop_end:
 
   mov  rcx, [rbp+16] ; hWnd
-  lea  rdx, [rsp+8]  ; Address of PAINTSTRUCT
+  lea  rdx, [rsp+48] ; Address of PAINTSTRUCT
   call EndPaint
 
-  add rsp, 72
+  add rsp, 120
   xor eax, eax
   jmp .Exit
 
