@@ -306,11 +306,18 @@ WndProc:
         jne .not_snake
 
         ; Is a snake
-          mov ecx, 0xb733ff ; Purple
+          mov ecx, 0xc4c4ff ; Brown
+          jmp .draw_pixel
+        
+        .not_fruit:
+          mov ecx, 0x009933 ; Green
           jmp .draw_pixel
         
         .not_snake:
-          mov ecx, 0x009933 ; Green
+          cmp al, FRUIT
+          jne .not_fruit
+          
+          mov ecx, 0x0000ff ; red
 
         .draw_pixel:
 
@@ -354,9 +361,6 @@ WndProc:
     add rsp, 32 ; Free shadow space
     pop rbp
     ret
-
-  .brush_creation_failed:
-    int3
 
 ; ecx row
 ; edx column
@@ -408,8 +412,25 @@ Update:
   push rbp
   mov  rbp, rsp
 
-  push r12      ; node counter
-  xor  r12, r12
+  sub rsp,        40
+  mov eax,        dword [rel length]
+  mov [rsp + 36], rax                ; length
+  xor eax,        eax
+  mov [rsp + 32], rax                ; counter
+  .node_loop:
+    mov eax, dword [rsp + 32]
+    cmp eax, dword [rsp + 36]
+    jne .loop_body
+
+    je .node_loop_end ; we're at the end of the array
+
+    .loop_body:
+
+    inc eax
+    jmp .node_loop
+
+  .node_loop_end:
+  add rsp, 40
 
   pop rbp
   ret
