@@ -77,7 +77,7 @@ section .bss ; Uninitialized data segment
   length resd 1
   
   tiles resb GRID_SIZE * GRID_SIZE
-  nodes resb GRID_SIZE * GRID_SIZE
+  nodes resb GRID_SIZE * GRID_SIZE * 2
 
 section .text ; Code segment
 WinMain:
@@ -440,78 +440,119 @@ Update:
   push rbp
   mov  rbp, rsp
 
+  push r11
   push r12
   push r13
   push r14
   push r15
+  push rdi ; We'll use rdi for stosb
 
   mov r12d, dword [rel length] ; Store length in r12d
-  xor r13d, r13d               ; Initialize counter in r13d
+  lea r14,  [rel nodes]        ; Get base address of nodes
+  lea r15,  [rel tiles]        ; Get base address of tiles
 
-  lea r14, [rel nodes] ; Get base address of nodes
-  lea r15, [rel tiles] ; Get base address of tiles
+  ; Store the current head position
+  movzx r8d, byte [r14]     ; Head x
+  movzx r9d, byte [r14 + 1] ; Head y
 
-  .node_loop:
-    cmp r13d, r12d     ; if (counter == length)
-    je  .node_loop_end ; exit loop
+  ; Update head position
+  add r8b, byte [rel xDirection]
+  add r9b, byte [rel yDirection]
 
-  .loop_body:
-    movzx r8d, byte [r14]     ; Head x
-    movzx r9d, byte [r14 + 1] ; Head y
+  ; Bounds checking for new head position
+  cmp r8b, GRID_SIZE
+  jge .x_lesser_than_bounds
+  cmp r8b, 0
+  jl  .x_greater_than_bounds
+  jmp .x_in_bounds
 
-    ; Bounds checking
-    cmp r8d, GRID_SIZE
-    jge .node_loop_end
-    cmp r9d, GRID_SIZE
-    jge .node_loop_end
+  .x_lesser_than_bounds:
+    xor r8b, r8b     ; Wrap around to 0 if out of bounds
+    jmp .x_in_bounds
+  .x_greater_than_bounds:
+    mov r8b, GRID_SIZE - 1
+  .x_in_bounds:
 
-    ; Calculate current position in tiles
-    mov  eax, r8d
+  cmp r9b, GRID_SIZE
+  jge .y_lesser_than_bounds
+  cmp r9b, 0
+  jl  .y_greater_than_bounds
+  jmp .y_in_bounds
+
+  .y_lesser_than_bounds:
+    xor r9b, r9b     ; Wrap around to 0 if out of bounds
+    jmp .y_in_bounds
+  .y_greater_than_bounds:
+    mov r9b, GRID_SIZE - 1
+  .y_in_bounds:
+
+  ; Move all segments
+  mov r13d, r12d ; Start from the tail
+  dec r13d       ; r13d = length - 1
+
+  .shift_segments:
+    cmp r13d, 0
+    je  .shift_segments_end
+
+    ; Move segment at r13d to r13d + 1
+    mov  eax,              r13d
+    imul eax,              2
+    mov  dl,               byte [r14 + rax] ; x of current segment
+    inc  rax
+    mov  r11b,             byte [r14 + rax] ; y of current segment
+    inc  rax
+    mov  byte [r14 + rax], dl
+    inc  rax
+    mov  byte [r14 + rax], r11b
+
+    dec r13d
+    jmp .shift_segments
+
+  .shift_segments_end:
+  ; Update head position in nodes array
+  mov [r14],     r8b
+  mov [r14 + 1], r9b
+
+  ; Clear all tiles
+  mov       rdi, r15                   ; Set destination to tiles array
+  mov       ecx, GRID_SIZE * GRID_SIZE ; Set count
+  xor       eax, eax                   ; Clear value
+  rep stosb                            ; Fill memory
+
+  ; Update tiles array with new snake positions
+  xor r13d, r13d ; Initialize counter
+
+  .update_tiles_loop:
+    cmp r13d, r12d
+    je  .update_tiles_end
+
+    mov   eax, r13d
+    imul  eax, 2
+    movzx esi, byte [r14 + rax]     ; x of segment
+    movzx edi, byte [r14 + rax + 1] ; y of segment
+
+    ; Calculate position in tiles
+    mov  eax, esi
     imul eax, GRID_SIZE
-    add  eax, r9d
-    
-    ; Clear current position
-    mov byte [r15 + rax], NONE
+    add  eax, edi
 
-    ; Update head position
-    add r8b, byte [rel xDirection]
-    add r9b, byte [rel yDirection]
-
-    ; Bounds checking for new position
-    cmp r8b, GRID_SIZE
-    jl  .x_in_bounds
-    xor r8b, r8b       ; Wrap around to 0 if out of bounds
-    .x_in_bounds:
-
-    cmp r9b, GRID_SIZE
-    jl  .y_in_bounds
-    xor r9b, r9b       ; Wrap around to 0 if out of bounds
-    .y_in_bounds:
-
-    ; Store new head position
-    mov [r14],     r8b
-    mov [r14 + 1], r9b
-
-    ; Calculate new position in tiles
-    movzx eax, r8b
-    imul  eax, GRID_SIZE
-    movzx ecx, r9b
-    add   eax, ecx
-
-    ; Set new snake position
+    ; Set snake position in tiles array
     mov byte [r15 + rax], SNAKE
 
-    inc r13d       ; increment counter
-    add r14, 2     ; Move to next node
-    jmp .node_loop ; loop again
+    inc r13d
+    jmp .update_tiles_loop
 
-  .node_loop_end:
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rbp
-    ret
+  .update_tiles_end:
+  ; TODO: Add fruit logic here
+
+  pop rdi
+  pop r15
+  pop r14
+  pop r13
+  pop r12
+  pop r11
+  pop rbp
+  ret
 
 ; rcx: pointer to MSG structure
 HandleInput:
