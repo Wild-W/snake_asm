@@ -25,9 +25,13 @@ WM_DESTROY          EQU 2
 WM_PAINT            EQU 0xF
 WS_EX_COMPOSITED    EQU 2000000h
 WS_OVERLAPPEDWINDOW EQU 0CF0000h
+PM_REMOVE           EQU 1
+WM_KEYDOWN          EQU 0x0100
 
 GRID_SIZE           EQU 20
 CELL_SIZE           EQU 30
+
+SPEED               EQU 300
 
 WindowWidth         EQU GRID_SIZE * CELL_SIZE
 WindowHeight        EQU GRID_SIZE * CELL_SIZE
@@ -36,7 +40,7 @@ extern              CreateWindowExA           ; Import external symbols
 extern              DefWindowProcA            ; Windows API functions, not decorated
 extern              DispatchMessageA
 extern              ExitProcess
-extern              GetMessageA
+extern              PeekMessageA
 extern              GetModuleHandleA
 extern              IsDialogMessageA
 extern              LoadImageA
@@ -51,6 +55,9 @@ extern              FillRect
 extern              DeleteObject
 extern              EndPaint
 extern              BeginPaint
+extern              Sleep
+extern              GetTickCount64
+extern              InvalidateRect
 
 global              WinMain                   ; Export symbols. The entry point
 
@@ -58,18 +65,19 @@ section             .data                     ; Initialized data segment
   WindowName db "Snake", 0
   ClassName  db "GridWindowClass", 0
 
+  last_time dq 0
+
+  xDirection db 1
+  yDirection db 0
+
 section .bss ; Uninitialized data segment
   alignb    8
   hInstance resq 1
 
-  headX  resd 1
-  headY  resd 1
   length resd 1
   
-  tiles      resb GRID_SIZE * GRID_SIZE
-  nodes      resb GRID_SIZE * GRID_SIZE
-  xDirection resb 1
-  yDirection resb 1
+  tiles resb GRID_SIZE * GRID_SIZE
+  nodes resb GRID_SIZE * GRID_SIZE
 
 section .text ; Code segment
 WinMain:
@@ -121,19 +129,12 @@ main:
 
   ; Set starting positions
   mov dword [rel length], 1
-  
-  mov eax,               GRID_SIZE / 2 - 1
-  mov dword [rel headX], eax
-  mov dword [rel headY], eax
 
   lea  rcx,              [rel tiles]
   mov  eax,              GRID_SIZE / 2 - 1
   imul eax,              GRID_SIZE
   add  eax,              GRID_SIZE / 2 - 1
   mov  byte [rcx + rax], SNAKE
-  
-  add rax,              rcx
-  mov byte [rel nodes], al
 
   mov eax,              17 * GRID_SIZE + 13
   mov byte [rcx + rax], FRUIT
@@ -220,37 +221,64 @@ main:
   call UpdateWindow
   add  rsp, 32           ; Remove the 32 bytes
 
-.MessageLoop:
-  sub  rsp, 32     ; 32 bytes of shadow space
-  lea  rcx, [msg]  ; [rbp - 56]
-  xor  edx, edx
-  xor  r8d, r8d
-  xor  r9d, r9d
-  call GetMessageA
-  add  rsp, 32     ; Remove the 32 bytes
-  cmp  rax, 0
-  je   .Done
+  .MessageLoop:
+      sub  rsp, 32
+      call GetTickCount64 ; Get the time
+      add  rsp, 32
 
-  sub  rsp, 32           ; 32 bytes of shadow space
-  mov  rcx, qword [hWnd] ; [rbp - 8]
-  lea  rdx, [msg]        ; [rbp - 56]
-  call IsDialogMessageA  ; For keyboard strokes
-  add  rsp, 32           ; Remove the 32 bytes
-  cmp  rax, 0
-  jne  .MessageLoop      ; Skip TranslateMessage and DispatchMessageA
+      mov rcx, [rel last_time]
+      sub rax, rcx
+      cmp rax, SPEED
+      jl  .continue_loop
 
-  sub  rsp, 32          ; 32 bytes of shadow space
-  lea  rcx, [msg]       ; [rbp - 56]
-  call TranslateMessage
-  add  rsp, 32          ; Remove the 32 bytes
+      call GetTickCount64
+      mov  [rel last_time], rax
 
-  sub  rsp, 32          ; 32 bytes of shadow space
-  lea  rcx, [msg]       ; [rbp - 56]
-  call DispatchMessageA
-  add  rsp, 32          ; Remove the 32 bytes
-  jmp  .MessageLoop
+      call Update
 
-.Done:
+      ; Invalidate the window to trigger a repaint
+      sub  rsp, 32           ; 32 bytes of shadow space
+      mov  rcx, qword [hWnd] ; [rbp - 8], the window handle
+      xor  rdx, rdx          ; lpRect = NULL (invalidate the entire client area)
+      mov  r8d, 1            ; bErase = TRUE (erase the background)
+      call InvalidateRect
+      add  rsp, 32           ; Clean up the stack
+
+    .continue_loop:
+      sub  rsp,              32        ; 32 bytes of shadow space
+      lea  rcx,              [msg]     ; [rbp - 56]
+      xor  edx,              edx
+      xor  r8d,              r8d
+      xor  r9d,              r9d
+      mov  dword [rsp + 32], PM_REMOVE
+      call PeekMessageA
+      add  rsp,              32        ; Remove the 32 bytes
+      cmp  rax,              0
+      je   .MessageLoop
+      
+      lea  rcx, [msg]
+      call HandleInput
+
+      sub  rsp, 32           ; 32 bytes of shadow space
+      mov  rcx, qword [hWnd] ; [rbp - 8]
+      lea  rdx, [msg]        ; [rbp - 56]
+      call IsDialogMessageA  ; For keyboard strokes
+      add  rsp, 32           ; Remove the 32 bytes
+      cmp  rax, 0
+      jne  .MessageLoop      ; Skip TranslateMessage and DispatchMessageA
+
+      sub  rsp, 32          ; 32 bytes of shadow space
+      lea  rcx, [msg]       ; [rbp - 56]
+      call TranslateMessage
+      add  rsp, 32          ; Remove the 32 bytes
+
+      sub  rsp, 32          ; 32 bytes of shadow space
+      lea  rcx, [msg]       ; [rbp - 56]
+      call DispatchMessageA
+      add  rsp, 32          ; Remove the 32 bytes
+      jmp  .MessageLoop
+
+  .Done:
   mov rsp, rbp ; Remove the stack frame
   pop rbp
   xor eax, eax
@@ -412,25 +440,120 @@ Update:
   push rbp
   mov  rbp, rsp
 
-  sub rsp,        40
-  mov eax,        dword [rel length]
-  mov [rsp + 36], rax                ; length
-  xor eax,        eax
-  mov [rsp + 32], rax                ; counter
+  push r12
+  push r13
+  push r14
+  push r15
+
+  mov r12d, dword [rel length] ; Store length in r12d
+  xor r13d, r13d               ; Initialize counter in r13d
+
+  lea r14, [rel nodes] ; Get base address of nodes
+  lea r15, [rel tiles] ; Get base address of tiles
+
   .node_loop:
-    mov eax, dword [rsp + 32]
-    cmp eax, dword [rsp + 36]
-    jne .loop_body
+    cmp r13d, r12d     ; if (counter == length)
+    je  .node_loop_end ; exit loop
 
-    je .node_loop_end ; we're at the end of the array
+  .loop_body:
+    movzx r8d, byte [r14]     ; Head x
+    movzx r9d, byte [r14 + 1] ; Head y
 
-    .loop_body:
+    ; Bounds checking
+    cmp r8d, GRID_SIZE
+    jge .node_loop_end
+    cmp r9d, GRID_SIZE
+    jge .node_loop_end
 
-    inc eax
-    jmp .node_loop
+    ; Calculate current position in tiles
+    mov  eax, r8d
+    imul eax, GRID_SIZE
+    add  eax, r9d
+    
+    ; Clear current position
+    mov byte [r15 + rax], NONE
+
+    ; Update head position
+    add r8b, byte [rel xDirection]
+    add r9b, byte [rel yDirection]
+
+    ; Bounds checking for new position
+    cmp r8b, GRID_SIZE
+    jl  .x_in_bounds
+    xor r8b, r8b       ; Wrap around to 0 if out of bounds
+    .x_in_bounds:
+
+    cmp r9b, GRID_SIZE
+    jl  .y_in_bounds
+    xor r9b, r9b       ; Wrap around to 0 if out of bounds
+    .y_in_bounds:
+
+    ; Store new head position
+    mov [r14],     r8b
+    mov [r14 + 1], r9b
+
+    ; Calculate new position in tiles
+    movzx eax, r8b
+    imul  eax, GRID_SIZE
+    movzx ecx, r9b
+    add   eax, ecx
+
+    ; Set new snake position
+    mov byte [r15 + rax], SNAKE
+
+    inc r13d       ; increment counter
+    add r14, 2     ; Move to next node
+    jmp .node_loop ; loop again
 
   .node_loop_end:
-  add rsp, 40
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    ret
 
-  pop rbp
-  ret
+; rcx: pointer to MSG structure
+HandleInput:
+  push rbp
+  mov  rbp, rsp
+
+  ; Check if it's a keydown message
+  cmp dword [rcx + 8], WM_KEYDOWN ; offset 8 is the message field
+  jne .default_outcome
+
+  ; Check which key was pressed
+  mov eax, [rcx + 16]  ; offset 16 is wParam
+  cmp eax, 'W'
+  je  .handle_up
+  cmp eax, 'A'
+  je  .handle_left
+  cmp eax, 'S'
+  je  .handle_down
+  cmp eax, 'D'
+  je  .handle_right
+  jmp .default_outcome
+
+  .handle_up:
+    mov byte [rel yDirection], -1
+    mov byte [rel xDirection], 0
+    jmp .default_outcome
+
+  .handle_left:
+    mov byte [rel xDirection], -1
+    mov byte [rel yDirection], 0
+    jmp .default_outcome
+
+  .handle_down:
+    mov byte [rel yDirection], 1
+    mov byte [rel xDirection], 0
+    jmp .default_outcome
+
+  .handle_right:
+    mov byte [rel xDirection], 1
+    mov byte [rel yDirection], 0
+    jmp .default_outcome
+
+  .default_outcome:
+    pop rbp
+    ret
