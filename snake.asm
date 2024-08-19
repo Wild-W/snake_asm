@@ -1,6 +1,7 @@
 ; Snake.asm
 ; x86-64 Windows
 ; Author: Connor Bren
+; License: MIT
 ;
 ; Template: https://www.davidgrantham.com/nasm-basicwindow64/
 ; Big thanks to David Grantham for the quickstart into x64 nasm
@@ -128,7 +129,7 @@ main:
   %define hWnd rbp - 8 ; 8 bytes
 
   ; Set starting positions
-  mov dword [rel length], 1
+  mov dword [rel length], 2
 
   lea  rcx,              [rel tiles]
   mov  eax,              GRID_SIZE / 2 - 1
@@ -222,61 +223,61 @@ main:
   add  rsp, 32           ; Remove the 32 bytes
 
   .MessageLoop:
-      sub  rsp, 32
-      call GetTickCount64 ; Get the time
-      add  rsp, 32
+    sub  rsp, 32
+    call GetTickCount64 ; Get the time
+    add  rsp, 32
 
-      mov rcx, [rel last_time]
-      sub rax, rcx
-      cmp rax, SPEED
-      jl  .continue_loop
+    mov rcx, [rel last_time]
+    sub rax, rcx
+    cmp rax, SPEED
+    jl  .continue_loop
 
-      call GetTickCount64
-      mov  [rel last_time], rax
+    call GetTickCount64
+    mov  [rel last_time], rax
 
-      call Update
+    call Update
 
-      ; Invalidate the window to trigger a repaint
-      sub  rsp, 32           ; 32 bytes of shadow space
-      mov  rcx, qword [hWnd] ; [rbp - 8], the window handle
-      xor  rdx, rdx          ; lpRect = NULL (invalidate the entire client area)
-      mov  r8d, 1            ; bErase = TRUE (erase the background)
-      call InvalidateRect
-      add  rsp, 32           ; Clean up the stack
+    ; Invalidate the window to trigger a repaint
+    sub  rsp, 32           ; 32 bytes of shadow space
+    mov  rcx, qword [hWnd] ; [rbp - 8], the window handle
+    xor  rdx, rdx          ; lpRect = NULL (invalidate the entire client area)
+    mov  r8d, 1            ; bErase = TRUE (erase the background)
+    call InvalidateRect
+    add  rsp, 32           ; Clean up the stack
 
-    .continue_loop:
-      sub  rsp,              32        ; 32 bytes of shadow space
-      lea  rcx,              [msg]     ; [rbp - 56]
-      xor  edx,              edx
-      xor  r8d,              r8d
-      xor  r9d,              r9d
-      mov  dword [rsp + 32], PM_REMOVE
-      call PeekMessageA
-      add  rsp,              32        ; Remove the 32 bytes
-      cmp  rax,              0
-      je   .MessageLoop
-      
-      lea  rcx, [msg]
-      call HandleInput
+  .continue_loop:
+    sub  rsp,              32        ; 32 bytes of shadow space
+    lea  rcx,              [msg]     ; [rbp - 56]
+    xor  edx,              edx
+    xor  r8d,              r8d
+    xor  r9d,              r9d
+    mov  dword [rsp + 32], PM_REMOVE
+    call PeekMessageA
+    add  rsp,              32        ; Remove the 32 bytes
+    cmp  rax,              0
+    je   .MessageLoop
+    
+    lea  rcx, [msg]
+    call HandleInput
 
-      sub  rsp, 32           ; 32 bytes of shadow space
-      mov  rcx, qword [hWnd] ; [rbp - 8]
-      lea  rdx, [msg]        ; [rbp - 56]
-      call IsDialogMessageA  ; For keyboard strokes
-      add  rsp, 32           ; Remove the 32 bytes
-      cmp  rax, 0
-      jne  .MessageLoop      ; Skip TranslateMessage and DispatchMessageA
+    sub  rsp, 32           ; 32 bytes of shadow space
+    mov  rcx, qword [hWnd] ; [rbp - 8]
+    lea  rdx, [msg]        ; [rbp - 56]
+    call IsDialogMessageA  ; For keyboard strokes
+    add  rsp, 32           ; Remove the 32 bytes
+    cmp  rax, 0
+    jne  .MessageLoop      ; Skip TranslateMessage and DispatchMessageA
 
-      sub  rsp, 32          ; 32 bytes of shadow space
-      lea  rcx, [msg]       ; [rbp - 56]
-      call TranslateMessage
-      add  rsp, 32          ; Remove the 32 bytes
+    sub  rsp, 32          ; 32 bytes of shadow space
+    lea  rcx, [msg]       ; [rbp - 56]
+    call TranslateMessage
+    add  rsp, 32          ; Remove the 32 bytes
 
-      sub  rsp, 32          ; 32 bytes of shadow space
-      lea  rcx, [msg]       ; [rbp - 56]
-      call DispatchMessageA
-      add  rsp, 32          ; Remove the 32 bytes
-      jmp  .MessageLoop
+    sub  rsp, 32          ; 32 bytes of shadow space
+    lea  rcx, [msg]       ; [rbp - 56]
+    call DispatchMessageA
+    add  rsp, 32          ; Remove the 32 bytes
+    jmp  .MessageLoop
 
   .Done:
   mov rsp, rbp ; Remove the stack frame
@@ -445,7 +446,7 @@ Update:
   push r13
   push r14
   push r15
-  push rdi ; We'll use rdi for stosb
+  push rdi
 
   mov r12d, dword [rel length] ; Store length in r12d
   lea r14,  [rel nodes]        ; Get base address of nodes
@@ -491,24 +492,26 @@ Update:
   dec r13d       ; r13d = length - 1
 
   .shift_segments:
-    cmp r13d, 0
-    je  .shift_segments_end
+    mov r13d, 0 ; Start from the head
+    .shift_loop:
+      cmp r13d, r12d - 1      ; Check if we reached the tail
+      jge .shift_segments_end
 
-    ; Move segment at r13d to r13d + 1
-    mov  eax,              r13d
-    imul eax,              2
-    mov  dl,               byte [r14 + rax] ; x of current segment
-    inc  rax
-    mov  r11b,             byte [r14 + rax] ; y of current segment
-    inc  rax
-    mov  byte [r14 + rax], dl
-    inc  rax
-    mov  byte [r14 + rax], r11b
+      ; Move segment at r13d to r13d + 1
+      mov  eax,              r13d
+      imul eax,              2
+      mov  dl,               byte [r14 + rax] ; x of current segment
+      inc  rax
+      mov  r11b,             byte [r14 + rax] ; y of current segment
+      inc  rax
+      mov  byte [r14 + rax], dl
+      inc  rax
+      mov  byte [r14 + rax], r11b
 
-    dec r13d
-    jmp .shift_segments
-
+      inc r13d
+      jmp .shift_loop
   .shift_segments_end:
+
   ; Update head position in nodes array
   mov [r14],     r8b
   mov [r14 + 1], r9b
@@ -576,21 +579,29 @@ HandleInput:
   jmp .default_outcome
 
   .handle_up:
+    cmp byte [rel xDirection], 1
+    je  .default_outcome
     mov byte [rel yDirection], 0
     mov byte [rel xDirection], -1
     jmp .default_outcome
 
   .handle_left:
+    cmp byte [rel yDirection], 1
+    je  .default_outcome
     mov byte [rel xDirection], 0
     mov byte [rel yDirection], -1
     jmp .default_outcome
 
   .handle_down:
+    cmp byte [rel xDirection], -1
+    je  .default_outcome
     mov byte [rel yDirection], 0
     mov byte [rel xDirection], 1
     jmp .default_outcome
 
   .handle_right:
+    cmp byte [rel yDirection], -1
+    je  .default_outcome
     mov byte [rel xDirection], 0
     mov byte [rel yDirection], 1
     jmp .default_outcome
