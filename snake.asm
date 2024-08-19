@@ -519,11 +519,11 @@ HandleInput:
   mov  rbp, rsp
 
   ; Check if it's a keydown message
-  cmp dword [rcx + 8], WM_KEYDOWN ; offset 8 is the message field
+  cmp dword [rcx + 8], WM_KEYDOWN ; message field
   jne .default_outcome
 
   ; Check which key was pressed
-  mov eax, [rcx + 16]  ; offset 16 is wParam
+  mov eax, [rcx + 16]  ; wParam field
   cmp eax, 'W'
   je  .handle_up
   cmp eax, 'A'
@@ -535,23 +535,23 @@ HandleInput:
   jmp .default_outcome
 
   .handle_up:
-    mov byte [rel yDirection], -1
-    mov byte [rel xDirection], 0
+    mov byte [rel yDirection], 0
+    mov byte [rel xDirection], -1
     jmp .default_outcome
 
   .handle_left:
-    mov byte [rel xDirection], -1
-    mov byte [rel yDirection], 0
+    mov byte [rel xDirection], 0
+    mov byte [rel yDirection], -1
     jmp .default_outcome
 
   .handle_down:
-    mov byte [rel yDirection], 1
-    mov byte [rel xDirection], 0
+    mov byte [rel yDirection], 0
+    mov byte [rel xDirection], 1
     jmp .default_outcome
 
   .handle_right:
-    mov byte [rel xDirection], 1
-    mov byte [rel yDirection], 0
+    mov byte [rel xDirection], 0
+    mov byte [rel yDirection], 1
     jmp .default_outcome
 
   .default_outcome:
