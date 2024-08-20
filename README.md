@@ -22,5 +22,5 @@ Make sure you have
 
 Then run this in command prompt
 ```sh
-nasm -f win64 snake.asm && gcc snake.obj -o snake.exe -luser32 -lkernel32 -lgdi32 && snake.exe
+nasm -f win64 snake.asm && gcc snake.obj -o snake.exe -luser32 -lkernel32 -lgdi32 -Wl,-subsystem,windows && snake.exe
 ```
