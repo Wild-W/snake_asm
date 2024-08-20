@@ -13,10 +13,10 @@ NONE                EQU 0
 TRUE                EQU 1
 FALSE               EQU 0
 
-FRUIT_SOUND_FREQ    EQU 523                   ; Middle C
+FRUIT_SOUND_FREQ    EQU 523                        ; Middle C
 FRUIT_SOUND_LEN     EQU 100
 
-COLOR_WINDOW        EQU 5                     ; Constants
+COLOR_WINDOW        EQU 5                          ; Constants
 CS_BYTEALIGNWINDOW  EQU 2000h
 CS_HREDRAW          EQU 2
 CS_VREDRAW          EQU 1
@@ -38,11 +38,11 @@ WM_KEYDOWN          EQU 0x0100
 GRID_SIZE           EQU 20
 CELL_SIZE           EQU 30
 
-WindowWidth         EQU GRID_SIZE * CELL_SIZE
-WindowHeight        EQU GRID_SIZE * CELL_SIZE
+WindowWidth         EQU GRID_SIZE * CELL_SIZE + 15
+WindowHeight        EQU GRID_SIZE * CELL_SIZE + 45
 
-extern              CreateWindowExA           ; Import external symbols
-extern              DefWindowProcA            ; Windows API functions, not decorated
+extern              CreateWindowExA                ; Import external symbols
+extern              DefWindowProcA                 ; Windows API functions, not decorated
 extern              DispatchMessageA
 extern              ExitProcess
 extern              PeekMessageA
@@ -65,13 +65,11 @@ extern              GetTickCount64
 extern              InvalidateRect
 extern              PlaySoundA
 
-global              WinMain                   ; Export symbols. The entry point
+global              WinMain                        ; Export symbols. The entry point
 
-section             .data                     ; Initialized data segment
+section             .data                          ; Initialized data segment
   WindowName db "Snake", 0
   ClassName  db "GridWindowClass", 0
-
-  FruitSound db "SystemStart", 0
 
   last_time dq 0
 
