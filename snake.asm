@@ -10,6 +10,12 @@ FRUIT               EQU 2
 SNAKE               EQU 1
 NONE                EQU 0
 
+TRUE                EQU 1
+FALSE               EQU 0
+
+FRUIT_SOUND_FREQ    EQU 523                   ; Middle C
+FRUIT_SOUND_LEN     EQU 100
+
 COLOR_WINDOW        EQU 5                     ; Constants
 CS_BYTEALIGNWINDOW  EQU 2000h
 CS_HREDRAW          EQU 2
@@ -31,8 +37,6 @@ WM_KEYDOWN          EQU 0x0100
 
 GRID_SIZE           EQU 20
 CELL_SIZE           EQU 30
-
-SPEED               EQU 300
 
 WindowWidth         EQU GRID_SIZE * CELL_SIZE
 WindowHeight        EQU GRID_SIZE * CELL_SIZE
@@ -59,6 +63,7 @@ extern              BeginPaint
 extern              Sleep
 extern              GetTickCount64
 extern              InvalidateRect
+extern              PlaySoundA
 
 global              WinMain                   ; Export symbols. The entry point
 
@@ -66,10 +71,16 @@ section             .data                     ; Initialized data segment
   WindowName db "Snake", 0
   ClassName  db "GridWindowClass", 0
 
+  FruitSound db "SystemStart", 0
+
   last_time dq 0
 
   xDirection db 1
   yDirection db 0
+
+  speed dd 150
+
+  hasTurnedThisTick db 0
 
 section .bss ; Uninitialized data segment
   alignb    8
@@ -131,14 +142,13 @@ main:
   ; Set starting positions
   mov dword [rel length], 2
 
-  lea  rcx,              [rel tiles]
-  mov  eax,              GRID_SIZE / 2 - 1
-  imul eax,              GRID_SIZE
-  add  eax,              GRID_SIZE / 2 - 1
-  mov  byte [rcx + rax], SNAKE
-
+  lea rcx,              [rel tiles]
   mov eax,              17 * GRID_SIZE + 13
   mov byte [rcx + rax], FRUIT
+
+  lea rcx,            [rel nodes]
+  mov byte [rcx],     GRID_SIZE / 2 - 1
+  mov byte [rcx + 1], GRID_SIZE / 2 - 1
   ; End set starting positions
 
   mov dword [wc.cbSize],      80                                           ; [rbp - 136]
@@ -229,7 +239,7 @@ main:
 
     mov rcx, [rel last_time]
     sub rax, rcx
-    cmp rax, SPEED
+    cmp eax, dword [rel speed]
     jl  .continue_loop
 
     call GetTickCount64
@@ -456,7 +466,7 @@ Update:
   movzx r8d, byte [r14]     ; Head x
   movzx r9d, byte [r14 + 1] ; Head y
 
-  ; Update head position
+  ; Calculate new head position
   add r8b, byte [rel xDirection]
   add r9b, byte [rel yDirection]
 
@@ -487,66 +497,81 @@ Update:
     mov r9b, GRID_SIZE - 1
   .y_in_bounds:
 
-  ; Move all segments
-  mov r13d, r12d ; Start from the tail
-  dec r13d       ; r13d = length - 1
+  ; Calculate new head position in tiles
+  mov  eax, r8d
+  imul eax, GRID_SIZE
+  add  eax, r9d
 
-  .shift_segments:
-    mov r13d, 0 ; Start from the head
-    .shift_loop:
-      cmp r13d, r12d - 1      ; Check if we reached the tail
-      jge .shift_segments_end
+  ; Check if new head position is fruit
+  mov bl, byte [r15 + rax]
+  cmp bl, FRUIT
+  je  .eat_fruit
 
-      ; Move segment at r13d to r13d + 1
-      mov  eax,              r13d
-      imul eax,              2
-      mov  dl,               byte [r14 + rax] ; x of current segment
-      inc  rax
-      mov  r11b,             byte [r14 + rax] ; y of current segment
-      inc  rax
-      mov  byte [r14 + rax], dl
-      inc  rax
-      mov  byte [r14 + rax], r11b
+  ; Check if new head position is snake (collision)
+  cmp bl, SNAKE
+  je  GameEnd
 
-      inc r13d
-      jmp .shift_loop
-  .shift_segments_end:
+  ; Clear the tail tile if not growing
+  mov   eax,              r12d
+  dec   eax
+  imul  eax,              2
+  movzx edi,              byte [r14 + rax]     ; Tail x
+  movzx esi,              byte [r14 + rax + 1] ; Tail y
+  mov   eax,              edi
+  imul  eax,              GRID_SIZE
+  add   eax,              esi
+  mov   byte [r15 + rax], NONE
 
-  ; Update head position in nodes array
-  mov [r14],     r8b
-  mov [r14 + 1], r9b
+  jmp .move_snake
 
-  ; Clear all tiles
-  mov       rdi, r15                   ; Set destination to tiles array
-  mov       ecx, GRID_SIZE * GRID_SIZE ; Set count
-  xor       eax, eax                   ; Clear value
-  rep stosb                            ; Fill memory
+  .eat_fruit:
+    ; Increment length
+    inc dword [rel length]
+    inc r12d
 
-  ; Update tiles array with new snake positions
-  xor r13d, r13d ; Initialize counter
+    call PlaceNewFruit
 
-  .update_tiles_loop:
-    cmp r13d, r12d
-    je  .update_tiles_end
+    ; Speed up
+    mov  eax,               dword [rel speed]
+    imul eax,               97
+    xor  edx,               edx
+    mov  ecx,               100
+    idiv ecx
+    mov  dword [rel speed], eax
 
-    mov   eax, r13d
-    imul  eax, 2
-    movzx esi, byte [r14 + rax]     ; x of segment
-    movzx edi, byte [r14 + rax + 1] ; y of segment
+  .move_snake:
+    ; Shift all segments
+    mov r13d, r12d ; Start from the new length
+    dec r13d       ; r13d = length - 1
 
-    ; Calculate position in tiles
-    mov  eax, esi
-    imul eax, GRID_SIZE
-    add  eax, edi
+  .shift_loop:
+    cmp r13d, 0    ; Check if we reached the head
+    jle .shift_end
 
-    ; Set snake position in tiles array
-    mov byte [r15 + rax], SNAKE
+    mov  eax,                  r13d
+    imul eax,                  2
+    sub  eax,                  2                    ; Go to previous segment
+    mov  dl,                   byte [r14 + rax]     ; x of previous segment
+    mov  r11b,                 byte [r14 + rax + 1] ; y of previous segment
+    add  eax,                  2
+    mov  byte [r14 + rax],     dl                   ; Store x in current segment
+    mov  byte [r14 + rax + 1], r11b                 ; Store y in current segment
 
-    inc r13d
-    jmp .update_tiles_loop
+    dec r13d
+    jmp .shift_loop
 
-  .update_tiles_end:
-  ; TODO: Add fruit logic here
+  .shift_end:
+    ; Update head position in nodes array
+    mov [r14],     r8b
+    mov [r14 + 1], r9b
+
+    ; Set new head position in tiles
+    mov  eax,              r8d
+    imul eax,              GRID_SIZE
+    add  eax,              r9d
+    mov  byte [r15 + rax], SNAKE
+  
+  mov byte [rel hasTurnedThisTick], FALSE
 
   pop rdi
   pop r15
@@ -563,8 +588,12 @@ HandleInput:
   mov  rbp, rsp
 
   ; Check if it's a keydown message
-  cmp dword [rcx + 8], WM_KEYDOWN ; message field
+  cmp dword [rcx + 8],              WM_KEYDOWN ; message field
   jne .default_outcome
+  cmp byte [rel hasTurnedThisTick], TRUE
+  je  .default_outcome
+
+  mov byte [rel hasTurnedThisTick], TRUE
 
   ; Check which key was pressed
   mov eax, [rcx + 16]  ; wParam field
@@ -609,3 +638,29 @@ HandleInput:
   .default_outcome:
     pop rbp
     ret
+
+; I'm 100% there's a better way to do this
+PlaceNewFruit:
+  push rbp
+  mov  rbp, rsp
+
+  .try_spawn:
+    ; Get random position
+    xor    rdx, rdx
+    rdrand rax
+    mov    rcx, GRID_SIZE * GRID_SIZE
+    div    rcx                        ; rax = rax / rcx
+
+    ; Check if empty
+    lea rcx,              [rel tiles]
+    cmp byte [rcx + rdx], NONE
+    jne .try_spawn
+
+    mov byte [rcx, + rdx], FRUIT
+
+  pop rbp
+  ret
+
+; Lol
+GameEnd:
+  int3
