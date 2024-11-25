@@ -64,6 +64,7 @@ extern              Sleep
 extern              GetTickCount64
 extern              InvalidateRect
 extern              PlaySoundA
+extern              ExitProcess
 
 global              WinMain                        ; Export symbols. The entry point
 
@@ -637,7 +638,7 @@ HandleInput:
     pop rbp
     ret
 
-; I'm 100% there's a better way to do this
+; I'm 100% sure there's a better way to do this
 PlaceNewFruit:
   push rbp
   mov  rbp, rsp
@@ -659,6 +660,6 @@ PlaceNewFruit:
   pop rbp
   ret
 
-; Lol
 GameEnd:
-  int3
+  xor rcx, rcx
+  call ExitProcess
