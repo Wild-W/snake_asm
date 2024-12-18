@@ -6,7 +6,7 @@
 
 It's the hit game snake! Written completely from scratch in assembly only using the Windows operating system APIs.
 
-## Why does the code suck?
+## Why is the code unoptimized/messy?
 
 I've never built an entire application in assembly before. In addition, x86-64 isn't very human friendly in comparison to simpler architectures.
 
